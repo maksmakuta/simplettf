@@ -27,11 +27,13 @@ Since `simpleTTF` is a one-header library, simply include the headers in your pr
 #include <simplettf/simplettf.hpp>
 
 int main() {
-    auto font = simplettf::load_file("fonts/Roboto-Regular.ttf");
+    auto font = simplettf::Font::load("fonts/Roboto-Regular.ttf");
     
     if (font) {
         auto glyph = font->get_glyph('A');
         // Rasterize or process glyph data
+    } else {
+        //get error using font.error() and print to user
     }
     
     return 0;
@@ -42,4 +44,3 @@ int main() {
 
 **Maks Makuta** (C) 2026  
 Distributed under the **MIT License**. See `LICENSE` for more information.
-u want to start by defining the `struct` layout for the TTF Table Directory or focus on the rasterizer logic first?
