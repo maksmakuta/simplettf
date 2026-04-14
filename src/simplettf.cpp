@@ -1,6 +1,7 @@
 #include "simplettf/simplettf.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <print>
@@ -349,22 +350,44 @@ namespace simplettf {
     }
 
     void Font::getGlyphMetrics(const GlyphID gid, Glyph& glyph, const float scale) const {
+        // 1. Safety check: Never try to read past the total glyph count in the font
+        if (gid >= m_metadata.glyph_count) {
+            glyph.advance = 0.0f;
+            glyph.lsb = 0.0f;
+            return;
+        }
+
         auto reader_opt = getReaderFor("hmtx");
         if (!reader_opt) return;
         auto& reader = *reader_opt;
 
         uint16_t raw_advance = 0;
+        int16_t raw_lsb = 0;
 
         if (gid < m_metadata.metrics_count) {
+            // Simple case: glyph has both unique advance and unique LSB
+            // Entry size is 4 bytes (2 advance + 2 lsb)
             reader.seek(gid * 4);
             raw_advance = reader.read<uint16_t>();
+            raw_lsb = reader.read<int16_t>();
         } else {
+            // Monospaced/Extended case: glyph shares the last available advance width
+            // but has its own entry in the trailing LSB array.
+
+            // Read the last valid advance width from the hMetrics array
             reader.seek((m_metadata.metrics_count - 1) * 4);
             raw_advance = reader.read<uint16_t>();
-            reader.seek(m_metadata.metrics_count * 4 + (gid - m_metadata.metrics_count) * 2);
+
+            // Calculate the position in the additional LSB-only array
+            // Offset = (Full hMetrics array) + (Index into LSB array * 2 bytes)
+            uint32_t lsb_offset = (m_metadata.metrics_count * 4) + ((gid - m_metadata.metrics_count) * 2);
+
+            reader.seek(lsb_offset);
+            raw_lsb = reader.read<int16_t>();
         }
 
         glyph.advance = static_cast<float>(raw_advance) * scale;
+        glyph.lsb = static_cast<float>(raw_lsb) * scale;
     }
 
     void Font::loadTables() {
@@ -431,6 +454,197 @@ namespace simplettf {
     float Font::getLineHeight(const float fontSize) const {
         const float scale = fontSize / static_cast<float>(m_metadata.units_per_em);
         return static_cast<float>(m_metadata.ascent - m_metadata.descent + m_metadata.line_gap) * scale;
+    }
+
+    struct Segment { Vec2 p0, p1; };
+
+    void flatten_quad(Vec2 p0, Vec2 p1, Vec2 p2, std::vector<Segment>& out, float tol = 0.1f) {
+        float dx = (p0.x + p2.x) * 0.5f - p1.x;
+        float dy = (p0.y + p2.y) * 0.5f - p1.y;
+        if (dx*dx + dy*dy > tol) {
+            Vec2 p01 = { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f };
+            Vec2 p12 = { (p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f };
+            Vec2 mid = { (p01.x + p12.x) * 0.5f, (p01.y + p12.y) * 0.5f };
+            flatten_quad(p0, p01, mid, out, tol);
+            flatten_quad(mid, p12, p2, out, tol);
+        } else {
+            out.push_back({p0, p2});
+        }
+    }
+
+    struct Cell {
+    float cover; // Vertical delta
+    float area;  // Area-weighted delta
+};
+
+    // Recursive subdivision for Quadratic Beziers
+void flatten_quadratic(Vec2 p0, Vec2 p1, Vec2 p2, std::vector<Segment>& out, float tol) {
+    // Calculate how far the midpoint of the curve is from the chord
+    float dx = (p0.x + p2.x) * 0.5f - p1.x;
+    float dy = (p0.y + p2.y) * 0.5f - p1.y;
+
+    if (dx*dx + dy*dy > tol) {
+        Vec2 p01 = { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f };
+        Vec2 p12 = { (p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f };
+        Vec2 mid = { (p01.x + p12.x) * 0.5f, (p01.y + p12.y) * 0.5f };
+
+        flatten_quadratic(p0, p01, mid, out, tol);
+        flatten_quadratic(mid, p12, p2, out, tol);
+    } else {
+        out.push_back({p0, p2});
+    }
+}
+
+std::vector<Segment> flatten(const Glyph& glyph, float tolerance) {
+    std::vector<Segment> segments;
+
+    for (size_t i = 0; i < glyph.contour_indices.size(); ++i) {
+        auto contour = glyph.getContour(i); // Assuming this returns std::vector<GlyphPoint>
+        if (contour.empty()) continue;
+
+        Vec2 start_point = contour[0].position;
+        Vec2 current = start_point;
+
+        for (size_t j = 1; j < contour.size(); ++j) {
+            if (contour[j].on_curve) {
+                segments.push_back({current, contour[j].position});
+                current = contour[j].position;
+            } else {
+                // Quadratic Bezier logic
+                Vec2 p1 = contour[j].position;
+                Vec2 p2;
+
+                size_t next_idx = (j + 1) % contour.size();
+                if (contour[next_idx].on_curve) {
+                    p2 = contour[next_idx].position;
+                    j++; // Skip the next point as we consumed it as p2
+                } else {
+                    // Implied midpoint rule: If two off-curve points are consecutive,
+                    // there is a virtual on-curve point exactly in the middle.
+                    p2 = { (p1.x + contour[next_idx].position.x) * 0.5f,
+                           (p1.y + contour[next_idx].position.y) * 0.5f };
+                }
+
+                flatten_quadratic(current, p1, p2, segments, tolerance);
+                current = p2;
+            }
+        }
+
+        // Always close the contour
+        if (current.x != start_point.x || current.y != start_point.y) {
+            segments.push_back({current, start_point});
+        }
+    }
+    return segments;
+}
+
+struct Rasterizer {
+    int width, height;
+    std::vector<Cell> cells;
+
+    Rasterizer(int w, int h) : width(w), height(h), cells(w * h, {0, 0}) {}
+
+    void add_line(Vec2 p0, Vec2 p1) {
+        if (std::abs(p0.y - p1.y) < 1e-6f) return;
+
+        // 1. Direction: 1 for down, -1 for up
+        const float dir = (p1.y > p0.y) ? 1.0f : -1.0f;
+        if (p0.y > p1.y) std::swap(p0, p1);
+
+        // 2. Vertical Clipping
+        if (p1.y <= 0 || p0.y >= height) return;
+
+        const float dxdy = (p1.x - p0.x) / (p1.y - p0.y);
+        float x = p0.x;
+
+        const int y_start = std::max(0, static_cast<int>(std::floor(p0.y)));
+        const int y_end   = std::min(height - 1, static_cast<int>(std::floor(p1.y)));
+
+        for (int y = y_start; y <= y_end; ++y) {
+            const float y_top = std::max(p0.y, static_cast<float>(y));
+            const float y_bottom = std::min(p1.y, static_cast<float>(y + 1));
+            const float dy = y_bottom - y_top;
+
+            const float x_next = x + dy * dxdy;
+
+            // Use the pixel column for the average X
+            const float x_avg = (x + x_next) * 0.5f;
+            const int ix = static_cast<int>(std::floor(x_avg));
+
+            if (ix >= 0 && ix < width) {
+                const float fx = x_avg - static_cast<float>(ix);
+
+                cells[y * width + ix].area += dy * (1.f - fx) * dir;
+                cells[y * width + ix].cover += dy * dir;
+            } else if (ix < 0) {
+                // If the line is to the left of the image, it's a full fill
+                cells[y * width + 0].cover += dy * dir;
+            }
+            x = x_next;
+        }
+    }
+
+    [[nodiscard]] std::vector<uint8_t> finalize() const {
+        std::vector<uint8_t> pixels(width * height, 0);
+
+        for (int y = 0; y < height; ++y) {
+            float accumulation = 0.0f;
+            // Flip Y for standard image viewers
+            const int dest_y = (height - 1) - y;
+
+            for (int x = 0; x < width; ++x) {
+                const auto& cell = cells[y * width + x];
+
+                // Total coverage:
+                // accumulation is the fill coming FROM the left.
+                // cell.area is the transition within THIS pixel.
+                float coverage = accumulation + cell.area;
+
+                // Update for the next pixel
+                accumulation += cell.cover;
+
+                // Clamping the absolute value handles the Non-Zero Winding rule
+                float alpha = std::clamp(std::abs(coverage), 0.0f, 1.0f);
+
+                pixels[dest_y * width + x] = static_cast<uint8_t>(alpha * 255.0f);
+            }
+        }
+        return pixels;
+    }
+
+};
+    Bitmap Font::rasterize(const Glyph& glyph) const {
+        constexpr int padding = 2; // Increased padding slightly for safety
+        const int width = static_cast<int>(std::ceil(glyph.bounds.width())) + padding * 2;
+        const int height = static_cast<int>(std::ceil(glyph.bounds.height())) + padding * 2;
+
+        // 1. Flatten the curves into linear segments
+        auto segments = flatten(glyph, 0.1f);
+
+        // 2. Initialize the buffer
+        Rasterizer buffer{width, height};
+
+        // 3. Offset glyph to fit in the bitmap (padding ensures edges aren't cut)
+        const Vec2 offset = {
+            -glyph.bounds.min.x + static_cast<float>(padding),
+            -glyph.bounds.min.y + static_cast<float>(padding)
+        };
+
+        // 4. Fill the cell buffer
+        for (const auto& seg : segments) {
+            buffer.add_line(
+                {seg.p0.x + offset.x, seg.p0.y + offset.y},
+                {seg.p1.x + offset.x, seg.p1.y + offset.y}
+            );
+        }
+
+        // 5. Finalize the pixel data
+        Bitmap result;
+        result.width = width;
+        result.height = height;
+        result.pixels = buffer.finalize();
+
+        return result;
     }
 
 }

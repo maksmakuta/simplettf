@@ -29,10 +29,10 @@ Since `simpleTTF` is a one-header library, simply include the headers in your pr
 
 int main() {
     if (const auto font = simplettf::Font::load("/path/to/font.ttf")) {
-        const auto id = font->getGlyphID(U'J');
+        const auto id = font->getGlyphID(U'A');
         std::println("GlyphID of A: {}", id);
 
-        if (const auto glyph = font->getGlyph(id,36)) {
+        if (const auto glyph = font->getGlyph(id,36)) { // 36 is a size
             // do with raw data what do you want
         }else {
             std::println(stderr,"Error: {}", font.error());

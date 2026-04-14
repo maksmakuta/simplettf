@@ -88,8 +88,18 @@ namespace simplettf {
         std::vector<uint32_t> contour_indices;
         BoundingBox bounds;
         float advance{0.0f};
+        float lsb{0.0f};
 
         [[nodiscard]] std::span<const PathPoint> getContour(size_t index) const;
+    };
+
+    struct Bitmap {
+        uint32_t width, height;
+        std::vector<uint8_t> pixels;
+
+        void set_pixel(const uint32_t x, const uint32_t y, const uint8_t val) {
+            if (x < width && y < height) pixels[y * width + x] = val;
+        }
     };
 
     using GlyphID = std::uint32_t;
@@ -103,13 +113,15 @@ namespace simplettf {
         [[nodiscard]] GlyphID getGlyphID(uint32_t codepoint) const;
         [[nodiscard]] std::expected<Glyph,std::string> getGlyph(GlyphID glyphID, float size = 1.f) const;
 
-        void getGlyphMetrics(GlyphID gid, Glyph &glyph, float scale) const;
+        [[nodiscard]] Bitmap rasterize(const Glyph& glyph) const;
+        [[nodiscard]] Bitmap rasterizeSDF(const Glyph& glyph) const;
 
     private:
         void loadTables();
         void populateGlyphCache();
         void parseFormat12(internal::BufferReader &reader);
         void parseFormat4(internal::BufferReader &reader);
+        void getGlyphMetrics(GlyphID gid, Glyph &glyph, float scale) const;
 
         static void getSimpleGlyph(internal::BufferReader& reader, Glyph& glyph, short num_contours, float scale);
 
