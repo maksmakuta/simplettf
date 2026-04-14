@@ -3,6 +3,7 @@
 #include <cstring>
 #include <fstream>
 #include <print>
+#include <span>
 
 namespace simplettf {
 
@@ -111,6 +112,26 @@ namespace simplettf {
         return font;
     }
 
+    const internal::TableInfo* Font::findTable(const std::string& tag) const {
+        const auto t = internal::as_tag(tag);
+        const auto it = std::ranges::find_if(m_tables, [&](const auto& info) {
+            return info.tag == t;
+        });
+        return it != m_tables.end() ? &*it : nullptr;
+    }
+
+    std::optional<internal::BufferReader> Font::getReaderFor(const std::string &tag) const {
+        const auto* table = findTable(tag);
+        if (!table) {
+            return std::nullopt;
+        }
+        return internal::BufferReader(std::span(m_font_data).subspan(table->offset, table->size));
+    }
+
+    Metadata Font::getMetadata() const {
+        return m_metadata;
+    }
+
     void Font::loadTables() {
         internal::BufferReader reader(m_font_data);
         reader.skip(4);
@@ -123,10 +144,20 @@ namespace simplettf {
             reader.skip(4);
             info.offset = reader.read<uint32_t>();
             info.size   = reader.read<uint32_t>();
-
-            std::println("{} | {:8} | {:8}", internal::to_string(info.tag), info.offset, info.size);
-
             m_tables.push_back(info);
+        }
+
+        if (auto headReader = getReaderFor("head")) {
+            headReader->seek(18);
+            m_metadata.units_per_em = headReader->read<uint16_t>();
+
+            headReader->seek(50);
+            m_metadata.loc_format = headReader->read<int16_t>();
+        }
+
+        if (auto maxpReader = getReaderFor("maxp")) {
+            maxpReader->seek(4);
+            m_metadata.glyph_count = maxpReader->read<uint16_t>();
         }
     }
 
