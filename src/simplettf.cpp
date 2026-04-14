@@ -223,7 +223,6 @@ namespace simplettf {
     }
 
     GlyphID Font::getGlyphID(const uint32_t codepoint) const {
-        std::println("Segment count: {}", m_segments.size());
         const auto it = std::ranges::lower_bound(
             m_segments,
             codepoint,
@@ -240,7 +239,7 @@ namespace simplettf {
         }
 
         if (it->id_range_offset == 0) {
-            return (codepoint + it->id_delta) & 0xFFFF;
+            return codepoint + it->id_delta & 0xFFFF;
         }
 
         const internal::BufferReader reader(m_font_data);
@@ -280,6 +279,43 @@ namespace simplettf {
             maxpReader->seek(4);
             m_metadata.glyph_count = maxpReader->read<uint16_t>();
         }
+
+        if (auto hheaReader = getReaderFor("hhea")) {
+            reader.skip(4);
+            m_metadata.ascent = reader.read<int16_t>();
+            m_metadata.descent = reader.read<int16_t>();
+            m_metadata.line_gap = reader.read<int16_t>();
+
+            hheaReader->seek(34);
+            m_metadata.metrics_count = hheaReader->read<uint16_t>();
+        }
+
+    }
+
+    internal::GlyphDataRange Font::getGlyphDataRange(const GlyphID id) const {
+        const auto reader_opt = getReaderFor("loca");
+        if (!reader_opt || id >= m_metadata.glyph_count) {
+            return {0, 0};
+        }
+
+        auto& reader = *reader_opt;
+        uint32_t start = 0;
+        uint32_t end = 0;
+
+        if (m_metadata.loc_format == 0) {
+            start = static_cast<uint32_t>(reader.peek<uint16_t>(id * 2)) * 2;
+            end   = static_cast<uint32_t>(reader.peek<uint16_t>((id + 1) * 2)) * 2;
+        } else {
+            start = reader.peek<uint32_t>(id * 4);
+            end   = reader.peek<uint32_t>((id + 1) * 4);
+        }
+
+        return { .offset = start, .length = end - start };
+    }
+
+    float Font::getLineHeight(const float fontSize) const {
+        const float scale = fontSize / static_cast<float>(m_metadata.units_per_em);
+        return static_cast<float>(m_metadata.ascent - m_metadata.descent + m_metadata.line_gap) * scale;
     }
 
 }
