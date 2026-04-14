@@ -14,9 +14,9 @@ A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) 
 ## Roadmap
 
 - [X] Basic header and table directory parsing.
-- [ ] Glyph outline extraction (Bézier curve data).
+- [X] Glyph outline extraction (Bézier curve data).
 - [ ] CPU-based scanline rasterizer.
-- [ ] Support for multiple `cmap` platforms (Unicode/Windows).
+- [X] Support for multiple `cmap` platforms (Unicode/Windows).
 - [ ] Kerning table (`kern` or `GPOS`) support.
 
 ## Building
@@ -25,17 +25,22 @@ Since `simpleTTF` is a one-header library, simply include the headers in your pr
 
 ```cpp
 #include <simplettf/simplettf.hpp>
+#include <print>
 
 int main() {
-    auto font = simplettf::Font::load("fonts/Roboto-Regular.ttf");
-    
-    if (font) {
-        auto glyph = font->get_glyph('A');
-        // Rasterize or process glyph data
+    if (const auto font = simplettf::Font::load("/path/to/font.ttf")) {
+        const auto id = font->getGlyphID(U'J');
+        std::println("GlyphID of A: {}", id);
+
+        if (const auto glyph = font->getGlyph(id,36)) {
+            // do with raw data what do you want
+        }else {
+            std::println(stderr,"Error: {}", font.error());
+        }
+
     } else {
-        //get error using font.error() and print to user
+        std::println(stderr,"Error: {}", font.error());
     }
-    
     return 0;
 }
 ```
