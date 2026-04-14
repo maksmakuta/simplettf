@@ -91,6 +91,14 @@ namespace simplettf {
 
     }
 
+    [[nodiscard]] std::span<const PathPoint> Glyph::getContour(const size_t index) const {
+        if (index >= contour_indices.size()) return {};
+        const uint32_t start = index == 0 ? 0 : contour_indices[index - 1] + 1;
+        const uint32_t end = contour_indices[index];
+        if (end < start || end >= points.size()) return {};
+        return {points.data() + start, end - start + 1};
+    }
+
     std::expected<Font, std::string> Font::load(const std::filesystem::path& path) {
         if (!std::filesystem::exists(path)) {
             return std::unexpected{"File not found: " + path.string()};
@@ -222,6 +230,60 @@ namespace simplettf {
         }
     }
 
+    void Font::getSimpleGlyph(
+        internal::BufferReader &reader,
+        Glyph &glyph,
+        const short num_contours,
+        const float scale
+    ) {
+        if (num_contours == 0) return;
+
+        glyph.contour_indices.resize(static_cast<std::size_t>(num_contours));
+        for (auto& end : glyph.contour_indices) {
+            end = reader.read<uint16_t>();
+        }
+
+        const uint32_t total_points = glyph.contour_indices.back() + 1;
+        glyph.points.resize(total_points);
+
+        const auto instr_len = reader.read<uint16_t>();
+        reader.skip(instr_len);
+
+        std::vector<uint8_t> flags(total_points);
+        for (uint32_t i = 0; i < total_points; ++i) {
+            const auto f = reader.read<uint8_t>();
+            flags[i] = f;
+            if (f & internal::REPEAT_FLAG) {
+                auto count = reader.read<uint8_t>();
+                while (count-- > 0) flags[++i] = f;
+            }
+        }
+
+        int32_t x = 0;
+        for (uint32_t i = 0; i < total_points; ++i) {
+            const uint8_t f = flags[i];
+            if (f & internal::X_SHORT_VECTOR) {
+                const auto val = reader.read<uint8_t>();
+                x += f & internal::X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR ? val : -val;
+            } else if (!(f & internal::X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR)) {
+                x += reader.read<int16_t>();
+            }
+            glyph.points[i].position.x = static_cast<float>(x) * scale;
+            glyph.points[i].on_curve = f & internal::ON_CURVE_POINT;
+        }
+
+        int32_t y = 0;
+        for (uint32_t i = 0; i < total_points; ++i) {
+            if (const uint8_t f = flags[i]; f & internal::Y_SHORT_VECTOR) {
+                const auto val = reader.read<uint8_t>();
+                y += f & internal::Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR ? val : -val;
+            } else if (!(f & internal::Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR)) {
+                y += reader.read<int16_t>();
+            }
+            glyph.points[i].position.y = static_cast<float>(y) * scale;
+        }
+    }
+
     GlyphID Font::getGlyphID(const uint32_t codepoint) const {
         const auto it = std::ranges::lower_bound(
             m_segments,
@@ -250,6 +312,59 @@ namespace simplettf {
         }
 
         return 0;
+    }
+
+    std::expected<Glyph,std::string> Font::getGlyph(const GlyphID glyphID, const float size) const {
+        if (size <= 0)
+            return std::unexpected{"size cannot be negative or equal to zero"};
+
+        const float scale = size / static_cast<float>(m_metadata.units_per_em);
+        Glyph glyph{};
+        getGlyphMetrics(glyphID, glyph, scale);
+        auto [offset, length] = getGlyphDataRange(glyphID);
+        if (length == 0) {
+            return glyph;
+        }
+
+        auto glyf_opt = getReaderFor("glyf");
+        if (!glyf_opt) return std::unexpected("Missing 'glyf' table");
+
+        auto& reader = *glyf_opt;
+        reader.seek(offset);
+
+        const auto num_contours = reader.read<int16_t>();
+
+        glyph.bounds.min.x = static_cast<float>(reader.read<int16_t>()) * scale;
+        glyph.bounds.min.y = static_cast<float>(reader.read<int16_t>()) * scale;
+        glyph.bounds.max.x = static_cast<float>(reader.read<int16_t>()) * scale;
+        glyph.bounds.max.y = static_cast<float>(reader.read<int16_t>()) * scale;
+
+        if (num_contours > 0) {
+            getSimpleGlyph(reader, glyph, num_contours, scale);
+        } else {
+            return std::unexpected("Composite glyphs not supported yet");
+        }
+
+        return glyph;
+    }
+
+    void Font::getGlyphMetrics(const GlyphID gid, Glyph& glyph, const float scale) const {
+        auto reader_opt = getReaderFor("hmtx");
+        if (!reader_opt) return;
+        auto& reader = *reader_opt;
+
+        uint16_t raw_advance = 0;
+
+        if (gid < m_metadata.metrics_count) {
+            reader.seek(gid * 4);
+            raw_advance = reader.read<uint16_t>();
+        } else {
+            reader.seek((m_metadata.metrics_count - 1) * 4);
+            raw_advance = reader.read<uint16_t>();
+            reader.seek(m_metadata.metrics_count * 4 + (gid - m_metadata.metrics_count) * 2);
+        }
+
+        glyph.advance = static_cast<float>(raw_advance) * scale;
     }
 
     void Font::loadTables() {
@@ -281,10 +396,10 @@ namespace simplettf {
         }
 
         if (auto hheaReader = getReaderFor("hhea")) {
-            reader.skip(4);
-            m_metadata.ascent = reader.read<int16_t>();
-            m_metadata.descent = reader.read<int16_t>();
-            m_metadata.line_gap = reader.read<int16_t>();
+            hheaReader->skip(4);
+            m_metadata.ascent = hheaReader->read<int16_t>();
+            m_metadata.descent = hheaReader->read<int16_t>();
+            m_metadata.line_gap = hheaReader->read<int16_t>();
 
             hheaReader->seek(34);
             m_metadata.metrics_count = hheaReader->read<uint16_t>();

@@ -28,7 +28,7 @@ namespace simplettf {
             std::uint32_t size;
         };
 
-        struct CMapSegment {
+        struct CMapSegment final {
             uint32_t start_code;
             uint32_t end_code;
             uint32_t start_glyph_id;
@@ -39,7 +39,7 @@ namespace simplettf {
             bool operator < (const uint32_t code) const { return end_code < code; }
         };
 
-        struct GlyphDataRange {
+        struct GlyphDataRange final {
             uint32_t offset;
             uint32_t length;
         };
@@ -60,11 +60,11 @@ namespace simplettf {
         int16_t line_gap{0};
     };
 
-    struct Vec2 {
+    struct Vec2 final {
         float x{0.0f}, y{0.0f};
     };
 
-    struct BoundingBox {
+    struct BoundingBox final {
         Vec2 min{0.0f, 0.0f};
         Vec2 max{0.0f, 0.0f};
 
@@ -78,9 +78,18 @@ namespace simplettf {
         }
     };
 
-    struct PathPoint {
+    struct PathPoint final {
         Vec2 position;
         bool on_curve{false}; // True = Line/Anchor, False = Quadratic Control Point
+    };
+
+    struct Glyph final {
+        std::vector<PathPoint> points;
+        std::vector<uint32_t> contour_indices;
+        BoundingBox bounds;
+        float advance{0.0f};
+
+        [[nodiscard]] std::span<const PathPoint> getContour(size_t index) const;
     };
 
     using GlyphID = std::uint32_t;
@@ -92,12 +101,17 @@ namespace simplettf {
         [[nodiscard]] Metadata getMetadata() const;
         [[nodiscard]] float getLineHeight(float fontSize) const;
         [[nodiscard]] GlyphID getGlyphID(uint32_t codepoint) const;
+        [[nodiscard]] std::expected<Glyph,std::string> getGlyph(GlyphID glyphID, float size = 1.f) const;
+
+        void getGlyphMetrics(GlyphID gid, Glyph &glyph, float scale) const;
 
     private:
         void loadTables();
         void populateGlyphCache();
         void parseFormat12(internal::BufferReader &reader);
         void parseFormat4(internal::BufferReader &reader);
+
+        static void getSimpleGlyph(internal::BufferReader& reader, Glyph& glyph, short num_contours, float scale);
 
         [[nodiscard]] internal::GlyphDataRange getGlyphDataRange(GlyphID id) const;
         [[nodiscard]] const internal::TableInfo *findTable(const std::string& tag) const;
