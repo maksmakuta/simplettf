@@ -102,17 +102,12 @@ void save_bitmap_pgm(const simplettf::Bitmap& bitmap, const std::string& filenam
 
 int main() {
     if (const auto font = simplettf::Font::load("/usr/share/fonts/open-sans/OpenSans-Regular.ttf")) {
-        const auto id = font->getGlyphID(U'Q');
-        std::println("GlyphID: {}", id);
-
-        if (const auto glyph = font->getGlyph(id,64)) {
-            const auto start = std::chrono::high_resolution_clock::now();
-            const auto bitmap = font->rasterize(*glyph);
+        const auto start = std::chrono::high_resolution_clock::now();
+        if (const auto glyph = font->getGlyph(font->getGlyphID(U'W'), 64)) {
+            const auto bitmap = simplettf::Font::rasterize(*glyph);
             const auto end = std::chrono::high_resolution_clock::now();
+            std::println("Total Glyph Process Time: {}", end - start);
             save_bitmap_pgm(bitmap, "out.pgm");
-            std::println("Time: {}", end - start);
-        } else {
-            std::println(stderr,"Error: {}", font.error());
         }
 
     } else {

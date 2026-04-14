@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
-#include <print>
 #include <span>
 
 namespace simplettf {
@@ -15,15 +14,15 @@ namespace simplettf {
         public:
             explicit BufferReader(const std::span<const std::byte> data) : m_data(data) {}
 
-            template <typename T>
-            requires std::is_arithmetic_v<T>
+            template<typename T>
+                requires std::is_arithmetic_v<T>
             T read() {
                 T value = peek<T>(m_offset);
                 m_offset += sizeof(T);
                 return value;
             }
 
-            template <typename T>
+            template<typename T>
             requires std::is_arithmetic_v<T>
             [[nodiscard]] T peek(const size_t offset) const {
                 if (offset + sizeof(T) > m_data.size()) {
@@ -39,18 +38,6 @@ namespace simplettf {
                 return value;
             }
 
-            float read_fixed() {
-                const auto val = read<int32_t>();
-                return static_cast<float>(val) / 65536.0f;
-            }
-
-            [[nodiscard]] std::span<const std::byte> view_slice(const size_t offset, const size_t length) const {
-                if (offset + length > m_data.size()) {
-                    throw std::runtime_error("BufferReader: Slice out of bounds");
-                }
-                return m_data.subspan(offset, length);
-            }
-
             void seek(const size_t position) {
                 if (position > m_data.size()) {
                     throw std::runtime_error("BufferReader: Seek out of bounds");
@@ -61,35 +48,33 @@ namespace simplettf {
             void skip(const size_t bytes) { seek(m_offset + bytes); }
 
             [[nodiscard]] size_t tell() const { return m_offset; }
-            [[nodiscard]] size_t remaining() const { return m_data.size() - m_offset; }
 
         private:
             std::span<const std::byte> m_data;
             size_t m_offset = 0;
         };
 
-        std::uint32_t as_tag(const std::string& tag) {
+        std::uint32_t as_tag(const std::string &tag) {
             if (tag.size() != 4) {
                 return 0;
             }
             return static_cast<std::uint32_t>(static_cast<unsigned char>(tag[0])) << 24 |
                    static_cast<std::uint32_t>(static_cast<unsigned char>(tag[1])) << 16 |
-                   static_cast<std::uint32_t>(static_cast<unsigned char>(tag[2])) <<  8 |
+                   static_cast<std::uint32_t>(static_cast<unsigned char>(tag[2])) << 8 |
                    static_cast<std::uint32_t>(static_cast<unsigned char>(tag[3]));
         }
 
         std::string to_string(const std::uint32_t tag) {
             std::string result;
-            result.resize_and_overwrite(4, [tag](char* buf, size_t) {
+            result.resize_and_overwrite(4, [tag](char *buf, size_t) {
                 buf[0] = static_cast<char>(tag >> 24 & 0xFF);
                 buf[1] = static_cast<char>(tag >> 16 & 0xFF);
-                buf[2] = static_cast<char>(tag >> 8  & 0xFF);
-                buf[3] = static_cast<char>(tag       & 0xFF);
+                buf[2] = static_cast<char>(tag >> 8 & 0xFF);
+                buf[3] = static_cast<char>(tag & 0xFF);
                 return 4;
             });
             return result;
         }
-
     }
 
     [[nodiscard]] std::span<const PathPoint> Glyph::getContour(const size_t index) const {
@@ -100,7 +85,7 @@ namespace simplettf {
         return {points.data() + start, end - start + 1};
     }
 
-    std::expected<Font, std::string> Font::load(const std::filesystem::path& path) {
+    std::expected<Font, std::string> Font::load(const std::filesystem::path &path) {
         if (!std::filesystem::exists(path)) {
             return std::unexpected{"File not found: " + path.string()};
         }
@@ -116,7 +101,7 @@ namespace simplettf {
         Font font;
         font.m_font_data.resize(fileSize);
 
-        if (!ifs.read(reinterpret_cast<char*>(font.m_font_data.data()), static_cast<std::streamsize>(fileSize))) {
+        if (!ifs.read(reinterpret_cast<char *>(font.m_font_data.data()), static_cast<std::streamsize>(fileSize))) {
             return std::unexpected{"Failed to read font data"};
         }
 
@@ -126,16 +111,16 @@ namespace simplettf {
         return font;
     }
 
-    const internal::TableInfo* Font::findTable(const std::string& tag) const {
+    const internal::TableInfo *Font::findTable(const std::string &tag) const {
         const auto t = internal::as_tag(tag);
-        const auto it = std::ranges::find_if(m_tables, [&](const auto& info) {
+        const auto it = std::ranges::find_if(m_tables, [&](const auto &info) {
             return info.tag == t;
         });
         return it != m_tables.end() ? &*it : nullptr;
     }
 
     std::optional<internal::BufferReader> Font::getReaderFor(const std::string &tag) const {
-        const auto* table = findTable(tag);
+        const auto *table = findTable(tag);
         if (!table) {
             return std::nullopt;
         }
@@ -149,7 +134,7 @@ namespace simplettf {
     void Font::populateGlyphCache() {
         auto reader_opt = getReaderFor("cmap");
         if (!reader_opt) return;
-        auto& reader = *reader_opt;
+        auto &reader = *reader_opt;
 
         reader.skip(2);
         const auto numTables = reader.read<uint16_t>();
@@ -186,7 +171,7 @@ namespace simplettf {
         }
     }
 
-    void Font::parseFormat12(internal::BufferReader& reader) {
+    void Font::parseFormat12(internal::BufferReader &reader) {
         reader.skip(10); // format, reserved, length, language
         const auto numGroups = reader.read<uint32_t>();
 
@@ -199,36 +184,40 @@ namespace simplettf {
             });
         }
     }
-    void Font::parseFormat4(internal::BufferReader& reader) {
+
+    void Font::parseFormat4(internal::BufferReader &reader) {
         // format (2), length (2), language (2) = 6 bytes
         reader.skip(6);
 
         const uint16_t segCount = reader.read<uint16_t>() / 2;
         reader.skip(6); // searchRange, entrySelector, rangeShift
 
-        std::vector<uint16_t> ends(segCount);
-        for (auto& v : ends) v = reader.read<uint16_t>();
+        const size_t endCodeOffset = reader.tell();
+        const size_t startCodeOffset = endCodeOffset + segCount * 2 + 2; // +2 for reservedPad
+        const size_t idDeltaOffset = startCodeOffset + segCount * 2;
+        const size_t idRangeOffsetBase = idDeltaOffset + segCount * 2;
 
-        reader.skip(2); // reservedPad
-
-        std::vector<uint16_t> starts(segCount);
-        for (auto& v : starts) v = reader.read<uint16_t>();
-
-        std::vector<int16_t> deltas(segCount);
-        for (auto& v : deltas) v = reader.read<int16_t>();
+        m_segments.reserve(m_segments.size() + segCount);
 
         for (uint16_t i = 0; i < segCount; ++i) {
-            const auto currentOffsetPos = static_cast<uint32_t>(reader.tell());
-            const auto rangeOffset = reader.read<uint16_t>();
+            const auto end = reader.peek<uint16_t>(endCodeOffset + i * 2);
+            const auto start = reader.peek<uint16_t>(startCodeOffset + i * 2);
+            const auto delta = reader.peek<int16_t>(idDeltaOffset + i * 2);
+
+            const auto currentOffsetInFile = static_cast<uint32_t>(idRangeOffsetBase + i * 2);
+            const auto rangeOffset = reader.peek<uint16_t>(currentOffsetInFile);
 
             m_segments.push_back({
-                .start_code = starts[i],
-                .end_code = ends[i],
-                .id_delta = deltas[i],
+                .start_code = start,
+                .end_code = end,
+                .start_glyph_id = 0,
+                .id_delta = delta,
                 .id_range_offset = rangeOffset,
-                .offset_in_file = currentOffsetPos
+                .offset_in_file = currentOffsetInFile
             });
         }
+
+        reader.seek(idRangeOffsetBase + segCount * 2);
     }
 
     void Font::getSimpleGlyph(
@@ -240,7 +229,7 @@ namespace simplettf {
         if (num_contours == 0) return;
 
         glyph.contour_indices.resize(static_cast<std::size_t>(num_contours));
-        for (auto& end : glyph.contour_indices) {
+        for (auto &end: glyph.contour_indices) {
             end = reader.read<uint16_t>();
         }
 
@@ -315,7 +304,7 @@ namespace simplettf {
         return 0;
     }
 
-    std::expected<Glyph,std::string> Font::getGlyph(const GlyphID glyphID, const float size) const {
+    std::expected<Glyph, std::string> Font::getGlyph(const GlyphID glyphID, const float size) const {
         if (size <= 0)
             return std::unexpected{"size cannot be negative or equal to zero"};
 
@@ -330,7 +319,7 @@ namespace simplettf {
         auto glyf_opt = getReaderFor("glyf");
         if (!glyf_opt) return std::unexpected("Missing 'glyf' table");
 
-        auto& reader = *glyf_opt;
+        auto &reader = *glyf_opt;
         reader.seek(offset);
 
         const auto num_contours = reader.read<int16_t>();
@@ -349,7 +338,7 @@ namespace simplettf {
         return glyph;
     }
 
-    void Font::getGlyphMetrics(const GlyphID gid, Glyph& glyph, const float scale) const {
+    void Font::getGlyphMetrics(const GlyphID gid, Glyph &glyph, const float scale) const {
         // 1. Safety check: Never try to read past the total glyph count in the font
         if (gid >= m_metadata.glyph_count) {
             glyph.advance = 0.0f;
@@ -359,7 +348,7 @@ namespace simplettf {
 
         auto reader_opt = getReaderFor("hmtx");
         if (!reader_opt) return;
-        auto& reader = *reader_opt;
+        auto &reader = *reader_opt;
 
         uint16_t raw_advance = 0;
         int16_t raw_lsb = 0;
@@ -371,17 +360,9 @@ namespace simplettf {
             raw_advance = reader.read<uint16_t>();
             raw_lsb = reader.read<int16_t>();
         } else {
-            // Monospaced/Extended case: glyph shares the last available advance width
-            // but has its own entry in the trailing LSB array.
-
-            // Read the last valid advance width from the hMetrics array
             reader.seek((m_metadata.metrics_count - 1) * 4);
             raw_advance = reader.read<uint16_t>();
-
-            // Calculate the position in the additional LSB-only array
-            // Offset = (Full hMetrics array) + (Index into LSB array * 2 bytes)
-            uint32_t lsb_offset = (m_metadata.metrics_count * 4) + ((gid - m_metadata.metrics_count) * 2);
-
+            const uint32_t lsb_offset = m_metadata.metrics_count * 4 + (gid - m_metadata.metrics_count) * 2;
             reader.seek(lsb_offset);
             raw_lsb = reader.read<int16_t>();
         }
@@ -401,7 +382,7 @@ namespace simplettf {
             info.tag = reader.read<uint32_t>();
             reader.skip(4);
             info.offset = reader.read<uint32_t>();
-            info.size   = reader.read<uint32_t>();
+            info.size = reader.read<uint32_t>();
             m_tables.push_back(info);
         }
 
@@ -427,7 +408,6 @@ namespace simplettf {
             hheaReader->seek(34);
             m_metadata.metrics_count = hheaReader->read<uint16_t>();
         }
-
     }
 
     internal::GlyphDataRange Font::getGlyphDataRange(const GlyphID id) const {
@@ -436,19 +416,19 @@ namespace simplettf {
             return {0, 0};
         }
 
-        auto& reader = *reader_opt;
+        auto &reader = *reader_opt;
         uint32_t start = 0;
         uint32_t end = 0;
 
         if (m_metadata.loc_format == 0) {
             start = static_cast<uint32_t>(reader.peek<uint16_t>(id * 2)) * 2;
-            end   = static_cast<uint32_t>(reader.peek<uint16_t>((id + 1) * 2)) * 2;
+            end = static_cast<uint32_t>(reader.peek<uint16_t>((id + 1) * 2)) * 2;
         } else {
             start = reader.peek<uint32_t>(id * 4);
-            end   = reader.peek<uint32_t>((id + 1) * 4);
+            end = reader.peek<uint32_t>((id + 1) * 4);
         }
 
-        return { .offset = start, .length = end - start };
+        return {.offset = start, .length = end - start};
     }
 
     float Font::getLineHeight(const float fontSize) const {
@@ -456,195 +436,166 @@ namespace simplettf {
         return static_cast<float>(m_metadata.ascent - m_metadata.descent + m_metadata.line_gap) * scale;
     }
 
-    struct Segment { Vec2 p0, p1; };
+    struct Segment {
+        [[maybe_unused]] Vec2 p0, p1;
+    };
 
-    void flatten_quad(Vec2 p0, Vec2 p1, Vec2 p2, std::vector<Segment>& out, float tol = 0.1f) {
-        float dx = (p0.x + p2.x) * 0.5f - p1.x;
-        float dy = (p0.y + p2.y) * 0.5f - p1.y;
-        if (dx*dx + dy*dy > tol) {
-            Vec2 p01 = { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f };
-            Vec2 p12 = { (p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f };
-            Vec2 mid = { (p01.x + p12.x) * 0.5f, (p01.y + p12.y) * 0.5f };
-            flatten_quad(p0, p01, mid, out, tol);
-            flatten_quad(mid, p12, p2, out, tol);
+    struct Cell {
+        int32_t cover{0};
+        int32_t area{0};
+    };
+
+    void flatten_quadratic(const Vec2 p0, const Vec2 p1, const Vec2 p2, std::vector<Segment> &out, const float tol) {
+        const float dx = (p0.x + p2.x) * 0.5f - p1.x;
+        const float dy = (p0.y + p2.y) * 0.5f - p1.y;
+
+        if (dx * dx + dy * dy > tol) {
+            const Vec2 p01 = {(p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f};
+            const Vec2 p12 = {(p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f};
+            const Vec2 mid = {(p01.x + p12.x) * 0.5f, (p01.y + p12.y) * 0.5f};
+
+            flatten_quadratic(p0, p01, mid, out, tol);
+            flatten_quadratic(mid, p12, p2, out, tol);
         } else {
             out.push_back({p0, p2});
         }
     }
 
-    struct Cell {
-    float cover; // Vertical delta
-    float area;  // Area-weighted delta
-};
+    std::vector<Segment> flatten(const Glyph &glyph, const float tolerance) {
+        std::vector<Segment> segments;
+        segments.reserve(glyph.points.size());
 
-    // Recursive subdivision for Quadratic Beziers
-void flatten_quadratic(Vec2 p0, Vec2 p1, Vec2 p2, std::vector<Segment>& out, float tol) {
-    // Calculate how far the midpoint of the curve is from the chord
-    float dx = (p0.x + p2.x) * 0.5f - p1.x;
-    float dy = (p0.y + p2.y) * 0.5f - p1.y;
+        for (size_t i = 0; i < glyph.contour_indices.size(); ++i) {
+            auto contour = glyph.getContour(i);
+            if (contour.empty()) continue;
 
-    if (dx*dx + dy*dy > tol) {
-        Vec2 p01 = { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f };
-        Vec2 p12 = { (p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f };
-        Vec2 mid = { (p01.x + p12.x) * 0.5f, (p01.y + p12.y) * 0.5f };
+            const Vec2 start_point = contour[0].position;
+            Vec2 current = start_point;
 
-        flatten_quadratic(p0, p01, mid, out, tol);
-        flatten_quadratic(mid, p12, p2, out, tol);
-    } else {
-        out.push_back({p0, p2});
-    }
-}
-
-std::vector<Segment> flatten(const Glyph& glyph, float tolerance) {
-    std::vector<Segment> segments;
-
-    for (size_t i = 0; i < glyph.contour_indices.size(); ++i) {
-        auto contour = glyph.getContour(i); // Assuming this returns std::vector<GlyphPoint>
-        if (contour.empty()) continue;
-
-        Vec2 start_point = contour[0].position;
-        Vec2 current = start_point;
-
-        for (size_t j = 1; j < contour.size(); ++j) {
-            if (contour[j].on_curve) {
-                segments.push_back({current, contour[j].position});
-                current = contour[j].position;
-            } else {
-                // Quadratic Bezier logic
-                Vec2 p1 = contour[j].position;
-                Vec2 p2;
-
-                size_t next_idx = (j + 1) % contour.size();
-                if (contour[next_idx].on_curve) {
-                    p2 = contour[next_idx].position;
-                    j++; // Skip the next point as we consumed it as p2
+            for (size_t j = 1; j < contour.size(); ++j) {
+                if (contour[j].on_curve) {
+                    segments.push_back({current, contour[j].position});
+                    current = contour[j].position;
                 } else {
-                    // Implied midpoint rule: If two off-curve points are consecutive,
-                    // there is a virtual on-curve point exactly in the middle.
-                    p2 = { (p1.x + contour[next_idx].position.x) * 0.5f,
-                           (p1.y + contour[next_idx].position.y) * 0.5f };
+                    const Vec2 p1 = contour[j].position;
+                    Vec2 p2;
+
+                    if (const size_t next_idx = (j + 1) % contour.size(); contour[next_idx].on_curve) {
+                        p2 = contour[next_idx].position;
+                        j++;
+                    } else {
+                        p2 = {
+                            (p1.x + contour[next_idx].position.x) * 0.5f,
+                            (p1.y + contour[next_idx].position.y) * 0.5f
+                        };
+                    }
+
+                    flatten_quadratic(current, p1, p2, segments, tolerance);
+                    current = p2;
                 }
+            }
 
-                flatten_quadratic(current, p1, p2, segments, tolerance);
-                current = p2;
+            if (current.x != start_point.x || current.y != start_point.y) {
+                segments.push_back({current, start_point});
+            }
+        }
+        return segments;
+    }
+
+    struct Rasterizer {
+        int width, height;
+        std::vector<Cell> cells;
+
+        Rasterizer(const int w, const int h) : width(w), height(h), cells(w * h, {0, 0}) {}
+
+        void add_line(const Vec2 p0, const Vec2 p1) {
+            constexpr int32_t SC = 65536;
+            auto x0 = static_cast<int32_t>(p0.x * SC);
+            auto y0 = static_cast<int32_t>(p0.y * SC);
+            auto x1 = static_cast<int32_t>(p1.x * SC);
+            auto y1 = static_cast<int32_t>(p1.y * SC);
+
+            if (y0 == y1) return;
+
+            const int32_t dir = y1 > y0 ? 1 : -1;
+            if (y0 > y1) {
+                std::swap(x0, x1);
+                std::swap(y0, y1);
+            }
+
+            const int64_t dxdy = (static_cast<int64_t>(x1 - x0) << 16) / (y1 - y0);
+            int32_t x_curr = x0;
+
+            const int y_start = y0 >> 16;
+            const int y_end = y1 >> 16;
+
+            Cell *row_ptr = &cells[0];
+
+            for (int y = y_start; y <= y_end; ++y) {
+                if (y < height) {
+                    const int32_t y_scan = y << 16;
+                    const int32_t y_top = y0 > y_scan ? y0 : y_scan;
+                    const int32_t y_bot = y1 < y_scan + SC ? y1 : y_scan + SC;
+                    const int32_t dy = y_bot - y_top;
+
+                    const int32_t x_next = x_curr + static_cast<int32_t>((static_cast<int64_t>(dy) * dxdy) >> 16);
+                    const int32_t x_avg = (x_curr + x_next) >> 1;
+                    const int ix = x_avg >> 16;
+
+                    Cell *current_row = row_ptr + y * width;
+
+                    if (ix < width) {
+                        const int32_t fx = x_avg & 0xFFFF;
+                        const auto area_inc = static_cast<int32_t>((static_cast<int64_t>(dy) * (SC - fx)) >> 16);
+
+                        current_row[ix].area += area_inc * dir;
+                        current_row[ix].cover += dy * dir;
+                    } else if (ix < 0) {
+                        current_row[0].cover += dy * dir;
+                    }
+                    x_curr = x_next;
+                }
             }
         }
 
-        // Always close the contour
-        if (current.x != start_point.x || current.y != start_point.y) {
-            segments.push_back({current, start_point});
-        }
-    }
-    return segments;
-}
+        [[nodiscard]] std::vector<uint8_t> finalize() const {
+            std::vector<uint8_t> pixels(width * height);
+            for (int y = 0; y < height; ++y) {
+                int32_t accumulation = 0;
+                const Cell *row_start = &cells[y * width];
+                uint8_t *dest_row = &pixels[(height - 1 - y) * width];
 
-struct Rasterizer {
-    int width, height;
-    std::vector<Cell> cells;
-
-    Rasterizer(int w, int h) : width(w), height(h), cells(w * h, {0, 0}) {}
-
-    void add_line(Vec2 p0, Vec2 p1) {
-        if (std::abs(p0.y - p1.y) < 1e-6f) return;
-
-        // 1. Direction: 1 for down, -1 for up
-        const float dir = (p1.y > p0.y) ? 1.0f : -1.0f;
-        if (p0.y > p1.y) std::swap(p0, p1);
-
-        // 2. Vertical Clipping
-        if (p1.y <= 0 || p0.y >= height) return;
-
-        const float dxdy = (p1.x - p0.x) / (p1.y - p0.y);
-        float x = p0.x;
-
-        const int y_start = std::max(0, static_cast<int>(std::floor(p0.y)));
-        const int y_end   = std::min(height - 1, static_cast<int>(std::floor(p1.y)));
-
-        for (int y = y_start; y <= y_end; ++y) {
-            const float y_top = std::max(p0.y, static_cast<float>(y));
-            const float y_bottom = std::min(p1.y, static_cast<float>(y + 1));
-            const float dy = y_bottom - y_top;
-
-            const float x_next = x + dy * dxdy;
-
-            // Use the pixel column for the average X
-            const float x_avg = (x + x_next) * 0.5f;
-            const int ix = static_cast<int>(std::floor(x_avg));
-
-            if (ix >= 0 && ix < width) {
-                const float fx = x_avg - static_cast<float>(ix);
-
-                cells[y * width + ix].area += dy * (1.f - fx) * dir;
-                cells[y * width + ix].cover += dy * dir;
-            } else if (ix < 0) {
-                // If the line is to the left of the image, it's a full fill
-                cells[y * width + 0].cover += dy * dir;
+                for (int x = 0; x < width; ++x) {
+                    const auto &[cover, area] = row_start[x];
+                    int32_t coverage = accumulation + area;
+                    accumulation += cover;
+                    coverage = std::abs(coverage);
+                    if (coverage > 65536) coverage = 65536;
+                    dest_row[x] = static_cast<uint8_t>((coverage * 255) >> 16);
+                }
             }
-            x = x_next;
+            return pixels;
         }
-    }
+    };
 
-    [[nodiscard]] std::vector<uint8_t> finalize() const {
-        std::vector<uint8_t> pixels(width * height, 0);
-
-        for (int y = 0; y < height; ++y) {
-            float accumulation = 0.0f;
-            // Flip Y for standard image viewers
-            const int dest_y = (height - 1) - y;
-
-            for (int x = 0; x < width; ++x) {
-                const auto& cell = cells[y * width + x];
-
-                // Total coverage:
-                // accumulation is the fill coming FROM the left.
-                // cell.area is the transition within THIS pixel.
-                float coverage = accumulation + cell.area;
-
-                // Update for the next pixel
-                accumulation += cell.cover;
-
-                // Clamping the absolute value handles the Non-Zero Winding rule
-                float alpha = std::clamp(std::abs(coverage), 0.0f, 1.0f);
-
-                pixels[dest_y * width + x] = static_cast<uint8_t>(alpha * 255.0f);
-            }
-        }
-        return pixels;
-    }
-
-};
-    Bitmap Font::rasterize(const Glyph& glyph) const {
+    Bitmap Font::rasterize(const Glyph &glyph) {
         constexpr int padding = 2; // Increased padding slightly for safety
         const int width = static_cast<int>(std::ceil(glyph.bounds.width())) + padding * 2;
         const int height = static_cast<int>(std::ceil(glyph.bounds.height())) + padding * 2;
-
-        // 1. Flatten the curves into linear segments
-        auto segments = flatten(glyph, 0.1f);
-
-        // 2. Initialize the buffer
+        const auto segments = flatten(glyph, 0.1f);
         Rasterizer buffer{width, height};
-
-        // 3. Offset glyph to fit in the bitmap (padding ensures edges aren't cut)
         const Vec2 offset = {
             -glyph.bounds.min.x + static_cast<float>(padding),
             -glyph.bounds.min.y + static_cast<float>(padding)
         };
-
-        // 4. Fill the cell buffer
-        for (const auto& seg : segments) {
+        for (const auto &[p0, p1]: segments) {
             buffer.add_line(
-                {seg.p0.x + offset.x, seg.p0.y + offset.y},
-                {seg.p1.x + offset.x, seg.p1.y + offset.y}
+                {p0.x + offset.x, p0.y + offset.y},
+                {p1.x + offset.x, p1.y + offset.y}
             );
         }
 
-        // 5. Finalize the pixel data
-        Bitmap result;
-        result.width = width;
-        result.height = height;
-        result.pixels = buffer.finalize();
-
-        return result;
+        return Bitmap{static_cast<uint32_t>(width), static_cast<uint32_t>(height), buffer.finalize()};
     }
 
 }

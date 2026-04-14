@@ -113,7 +113,7 @@ namespace simplettf {
         [[nodiscard]] GlyphID getGlyphID(uint32_t codepoint) const;
         [[nodiscard]] std::expected<Glyph,std::string> getGlyph(GlyphID glyphID, float size = 1.f) const;
 
-        [[nodiscard]] Bitmap rasterize(const Glyph& glyph) const;
+        [[nodiscard]] static Bitmap rasterize(const Glyph& glyph);
         [[nodiscard]] Bitmap rasterizeSDF(const Glyph& glyph) const;
 
     private:
