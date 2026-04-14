@@ -13,7 +13,7 @@ A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) 
 
 ## Roadmap
 
-- [ ] Basic header and table directory parsing.
+- [X] Basic header and table directory parsing.
 - [ ] Glyph outline extraction (Bézier curve data).
 - [ ] CPU-based scanline rasterizer.
 - [ ] Support for multiple `cmap` platforms (Unicode/Windows).

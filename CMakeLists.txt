@@ -6,9 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(simplettf SHARED
+    include/simplettf/simplettf.hpp
+
     src/simplettf.cpp
-        src/simplettf.cpp
-        example/main.cpp
 )
 
 target_include_directories(simplettf PRIVATE include)
