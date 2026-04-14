@@ -18,6 +18,17 @@ namespace simplettf {
             std::uint32_t size;
         };
 
+        struct CMapSegment {
+            uint32_t start_code;
+            uint32_t end_code;
+            uint32_t start_glyph_id;
+            int16_t  id_delta;
+            uint16_t id_range_offset;
+            uint32_t offset_in_file;
+
+            bool operator < (const uint32_t code) const { return end_code < code; }
+        };
+
         std::uint32_t as_tag(const std::string& tag);
         std::string to_string(std::uint32_t tag);
 
@@ -29,11 +40,42 @@ namespace simplettf {
         uint32_t glyph_count{0};
     };
 
+    struct Vec2 {
+        float x{0.0f}, y{0.0f};
+    };
+
+    struct BoundingBox {
+        Vec2 min{0.0f, 0.0f};
+        Vec2 max{0.0f, 0.0f};
+
+        [[nodiscard]] float width() const  { return max.x - min.x; }
+        [[nodiscard]] float height() const { return max.y - min.y; }
+        [[nodiscard]] Vec2  size() const   { return { width(), height() }; }
+
+        [[nodiscard]] bool contains(const Vec2 p) const {
+            return p.x >= min.x && p.x <= max.x &&
+                   p.y >= min.y && p.y <= max.y;
+        }
+    };
+
+    struct PathPoint {
+        Vec2 position;
+        bool on_curve{false}; // True = Line/Anchor, False = Quadratic Control Point
+    };
+
+    using GlyphID = std::uint32_t;
+
     class Font final {
     public:
         static std::expected<Font,std::string> load(const std::filesystem::path& path);
 
         [[nodiscard]] Metadata getMetadata() const;
+
+        void populateGlyphCache();
+        void parseFormat12(internal::BufferReader &reader);
+        void parseFormat4(internal::BufferReader &reader);
+
+        [[nodiscard]] GlyphID getGlyphID(uint32_t codepoint) const;
 
     private:
         void loadTables();
@@ -44,6 +86,7 @@ namespace simplettf {
         Metadata m_metadata;
         std::vector<std::byte> m_font_data;
         std::vector<internal::TableInfo> m_tables;
+        std::vector<internal::CMapSegment> m_segments;
     };
 
 }
