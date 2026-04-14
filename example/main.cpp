@@ -4,45 +4,60 @@
 #include "simplettf/simplettf.hpp"
 
 void export_to_svg(const simplettf::Glyph& glyph, const std::string& filename) {
-    // We add a little padding so the glyph isn't touching the edges
-    float padding = 10.0f;
-    float width = glyph.bounds.width() + (padding * 2);
-    float height = glyph.bounds.height() + (padding * 2);
+    if (glyph.points.empty()) return;
 
-    // SVG header with a coordinate system flip (scale 1, -1) to match TTF's Y-up
+    // ViewBox: [min_x, min_y, width, height]
+    // We negate Y and use -max.y as the top because SVG's Y increases downwards
     std::string svg = std::format(
-        R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}">)",
-        glyph.bounds.min.x - padding,
-        -glyph.bounds.max.y - padding, // Flip Y for the viewbox
-        width,
-        height
+        R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="{:.2f} {:.2f} {:.2f} {:.2f}">)",
+        glyph.bounds.min.x - 5,
+        -glyph.bounds.max.y - 5,
+        glyph.bounds.width() + 10,
+        glyph.bounds.height() + 10
     );
 
-    // Start the path
     svg += R"(<path d=")";
 
     for (size_t i = 0; i < glyph.contour_indices.size(); ++i) {
         auto contour = glyph.getContour(i);
         if (contour.empty()) continue;
 
-        for (size_t j = 0; j < contour.size(); ++j) {
-            const auto& p = contour[j];
-            // We negate the Y position because SVG is Y-down
-            char command = (j == 0) ? 'M' : 'L';
+        // Move to the first point
+        svg += std::format("M {:.2f} {:.2f} ", contour[0].position.x, -contour[0].position.y);
 
-            // Note: This simple version treats everything as lines (L).
-            // We'll handle Beziers in a second.
-            svg += std::format("{} {:.2f} {:.2f} ", command, p.position.x, -p.position.y);
+        for (size_t j = 1; j < contour.size(); ++j) {
+            const auto& p = contour[j];
+
+            if (p.on_curve) {
+                // Regular line
+                svg += std::format("L {:.2f} {:.2f} ", p.position.x, -p.position.y);
+            } else {
+                // It's a control point for a Quadratic Bezier (Q)
+                // We need the NEXT point to be the destination
+                size_t next_idx = (j + 1) % contour.size();
+                const auto& next_p = contour[next_idx];
+
+                if (next_p.on_curve) {
+                    svg += std::format("Q {:.2f} {:.2f}, {:.2f} {:.2f} ",
+                        p.position.x, -p.position.y,
+                        next_p.position.x, -next_p.position.y);
+                } else {
+                    // Two off-curve points in a row: find the midpoint
+                    float mid_x = (p.position.x + next_p.position.x) / 2.0f;
+                    float mid_y = (p.position.y + next_p.position.y) / 2.0f;
+                    svg += std::format("Q {:.2f} {:.2f}, {:.2f} {:.2f} ",
+                        p.position.x, -p.position.y,
+                        mid_x, -mid_y);
+                }
+            }
         }
-        svg += "Z "; // Close contour
+        svg += "Z "; // Close the contour
     }
 
-    svg += R"(" fill="none" stroke="black" stroke-width="0.5"/>)";
+    svg += R"(" fill="red" stroke="black" stroke-width="0.5"/>)";
     svg += "</svg>";
 
-    std::ofstream out(filename);
-    out << svg;
-    out.close();
+    std::ofstream(filename) << svg;
 }
 
 int main() {
@@ -57,7 +72,7 @@ int main() {
         std::println("descent:      {}", metadata.descent);
         std::println("line_gap:     {}", metadata.line_gap);
 
-        const auto id = font->getGlyphID(U'A');
+        const auto id = font->getGlyphID(U'J');
         std::println("GlyphID of A: {}", id);
 
         if (const auto glyph = font->getGlyph(id,36)) {
