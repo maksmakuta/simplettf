@@ -114,7 +114,7 @@ namespace simplettf {
         [[nodiscard]] std::expected<Glyph,std::string> getGlyph(GlyphID glyphID, float size = 1.f) const;
 
         [[nodiscard]] static Bitmap rasterize(const Glyph& glyph);
-        [[nodiscard]] Bitmap rasterizeSDF(const Glyph& glyph) const;
+        [[nodiscard]] static Bitmap rasterizeSDF(const Glyph& glyph,float spread = 8.0f);
 
     private:
         void loadTables();

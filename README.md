@@ -20,7 +20,7 @@ A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) 
 - [X] Support for multiple `cmap` platforms (Unicode/Windows).
 - [ ] Kerning table (`kern` or `GPOS`) support.
 - [ ] Extend .otf file support
-- [ ] SDF bitmap rendering
+- [X] SDF bitmap rendering
 
 ---
 

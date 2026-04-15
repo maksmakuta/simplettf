@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <numeric>
+#include <execution>
 #include <span>
 
 namespace simplettf {
@@ -174,6 +176,7 @@ namespace simplettf {
     void Font::parseFormat12(internal::BufferReader &reader) {
         reader.skip(10); // format, reserved, length, language
         const auto numGroups = reader.read<uint32_t>();
+        m_segments.reserve(numGroups);
 
         for (uint32_t i = 0; i < numGroups; ++i) {
             m_segments.push_back({
@@ -339,7 +342,6 @@ namespace simplettf {
     }
 
     void Font::getGlyphMetrics(const GlyphID gid, Glyph &glyph, const float scale) const {
-        // 1. Safety check: Never try to read past the total glyph count in the font
         if (gid >= m_metadata.glyph_count) {
             glyph.advance = 0.0f;
             glyph.lsb = 0.0f;
@@ -375,6 +377,7 @@ namespace simplettf {
         internal::BufferReader reader(m_font_data);
         reader.skip(4);
         const auto numTables = reader.read<uint16_t>();
+        m_tables.reserve(numTables);
         reader.skip(6);
 
         for (int i = 0; i < numTables; ++i) {
@@ -447,9 +450,7 @@ namespace simplettf {
 
     void flatten_quadratic(const Vec2 p0, const Vec2 p1, const Vec2 p2, std::vector<Segment> &out, const float tol) {
         const float dx = (p0.x + p2.x) * 0.5f - p1.x;
-        const float dy = (p0.y + p2.y) * 0.5f - p1.y;
-
-        if (dx * dx + dy * dy > tol) {
+        if (const float dy = (p0.y + p2.y) * 0.5f - p1.y; dx * dx + dy * dy > tol) {
             const Vec2 p01 = {(p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f};
             const Vec2 p12 = {(p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f};
             const Vec2 mid = {(p01.x + p12.x) * 0.5f, (p01.y + p12.y) * 0.5f};
@@ -596,6 +597,93 @@ namespace simplettf {
         }
 
         return Bitmap{static_cast<uint32_t>(width), static_cast<uint32_t>(height), buffer.finalize()};
+    }
+
+#include <execution>
+
+    Bitmap Font::rasterizeSDF(const Glyph& glyph, const float spread) {
+        const float spread_sq = spread * spread;
+        const int padding = static_cast<int>(spread);
+
+        const int width = static_cast<int>(std::ceil(glyph.bounds.width())) + padding * 2;
+        const int height = static_cast<int>(std::ceil(glyph.bounds.height())) + padding * 2;
+
+        const auto segments = flatten(glyph, 0.25f);
+
+        struct PreparedSegment {
+            Vec2 p0, p1, ab;
+            float inv_len_sq;
+            float min_y, max_y, min_x, max_x;
+        };
+
+        std::vector<PreparedSegment> prepared;
+        prepared.reserve(segments.size());
+        for (const auto&[p0, p1] : segments) {
+            const float dx = p1.x - p0.x;
+            const float dy = p1.y - p0.y;
+            prepared.push_back({
+                p0, p1, {dx, dy},
+                dx*dx + dy*dy > 0.0f ? 1.0f / (dx*dx + dy*dy) : 0.0f,
+                std::min(p0.y, p1.y), std::max(p0.y, p1.y),
+                std::min(p0.x, p1.x), std::max(p0.x, p1.x)
+            });
+        }
+
+        Bitmap result{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+        result.pixels.resize(width * height);
+
+        std::vector<int> rows(height);
+        std::iota(rows.begin(), rows.end(), 0);
+
+        std::for_each(std::execution::par_unseq, rows.begin(), rows.end(), [&](const int y) {
+            const float py = glyph.bounds.max.y + static_cast<float>(padding) - static_cast<float>(y);
+            const uint32_t row_start = y * width;
+
+            std::vector<const PreparedSegment*> active_segments;
+            active_segments.reserve(prepared.size() / 4);
+            for (const auto& s : prepared) {
+                if (py >= s.min_y && py < s.max_y) active_segments.push_back(&s);
+            }
+
+            for (int x = 0; x < width; ++x) {
+                const float px = glyph.bounds.min.x - static_cast<float>(padding) + static_cast<float>(x);
+
+                float min_d_sq = spread_sq;
+                int intersections = 0;
+
+                for (const auto* s : active_segments) {
+                    if (const float t_ray = (py - s->p0.y) / s->ab.y; px < s->p0.x + t_ray * s->ab.x)
+                        intersections++;
+                }
+
+                for (const auto& s : prepared) {
+                    const float dy_box = py < s.min_y ? s.min_y - py : py > s.max_y ? py - s.max_y : 0.0f;
+                    if (dy_box * dy_box >= min_d_sq) continue;
+
+                    if (const float dx_box = px < s.min_x ? s.min_x - px : px > s.max_x ? px - s.max_x : 0.0f; dx_box * dx_box + dy_box * dy_box >= min_d_sq)
+                        continue;
+
+                    const float apx = px - s.p0.x;
+                    const float apy = py - s.p0.y;
+                    float t = (apx * s.ab.x + apy * s.ab.y) * s.inv_len_sq;
+                    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+
+                    const float dx = px - (s.p0.x + t * s.ab.x);
+                    const float dy = py - (s.p0.y + t * s.ab.y);
+
+                    if (const float d_sq = dx * dx + dy * dy; d_sq < min_d_sq)
+                        min_d_sq = d_sq;
+                }
+
+                float dist = std::sqrt(min_d_sq);
+                if (intersections % 2 == 0) dist = -dist;
+
+                float alpha = 128.0f + dist / spread * 128.0f;
+                result.pixels[row_start + x] = static_cast<uint8_t>(std::clamp(alpha, 0.0f, 255.0f));
+            }
+        });
+
+        return result;
     }
 
 }
