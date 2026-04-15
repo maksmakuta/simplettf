@@ -1,6 +1,6 @@
 # simpleTTF
 
-A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) and OpenType (.otf) fonts. Designed for developers who need high-performance font handling without the overhead of FreeType.
+A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) fonts. Designed for developers who need high-performance font handling without the overhead of FreeType.
 
 ---
 ## Features
@@ -8,7 +8,7 @@ A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) 
 * **Zero External Dependencies:** Built from the ground up using standard C++23.
 * **Modern API:** Utilizes `std::span`, `std::expected`, and `std::optional` for a safe, modern developer experience.
 * **CPU Rasterization:** High-quality software rasterizer for generating glyph bitmaps directly to memory.
-* **Efficient Parsing:** Fast binary parsing of TTF/OTF tables (head, maxp, loca, glyf, cmap).
+* **Efficient Parsing:** Fast binary parsing of TTF tables (head, maxp, loca, glyf, cmap).
 * **Metrics & Kerning:** Easy access to horizontal metrics, advances, and kerning pairs.
 * **Memory Efficient:** Minimal memory footprint, suitable for embedded systems or high-performance game engines.
 
@@ -19,7 +19,6 @@ A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) 
 - [X] CPU-based scanline rasterizer.
 - [X] Support for multiple `cmap` platforms (Unicode/Windows).
 - [X] Kerning table (`kern`) support. (No `GPOS` support for now)
-- [ ] Extend .otf file support
 - [X] SDF bitmap rendering
 
 ---
