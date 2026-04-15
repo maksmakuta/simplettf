@@ -109,6 +109,7 @@ namespace simplettf {
 
         font.loadTables();
         font.populateGlyphCache();
+        font.readKerning();
 
         return font;
     }
@@ -684,6 +685,57 @@ namespace simplettf {
         });
 
         return result;
+    }
+
+    float Font::getKerning(const GlyphID left, const GlyphID right, const float fontSize) const {
+        if (const auto it = kerning_map.find(internal::KerningPair(left,right)); it != kerning_map.end()) {
+            const float scale = fontSize / static_cast<float>(getMetadata().units_per_em);
+            return it->second * scale;
+        }
+        return 0.0f;
+    }
+
+    void Font::readKerning() {
+        auto reader_opt = getReaderFor("kern");
+        if (!reader_opt) return;
+
+        auto& reader = *reader_opt;
+
+        try {
+            const auto version = reader.read<uint16_t>();
+            auto nTables = reader.read<uint16_t>();
+
+            if (version == 1 && nTables == 0) {
+                reader.seek(4);
+                nTables = reader.read<uint16_t>();
+            }
+
+            for (uint16_t i = 0; i < nTables; ++i) {
+                const size_t subtable_start = reader.tell();
+
+                reader.skip(2);
+                const auto length = reader.read<uint16_t>();
+                const auto coverage = reader.read<uint16_t>();
+
+                const auto format = static_cast<uint8_t>(coverage >> 8);
+
+                if (const bool is_horizontal = coverage & 0x0001; format == 0 && is_horizontal) {
+                    const auto nPairs = reader.read<uint16_t>();
+                    reader.skip(6); // Skip searchRange, entrySelector, rangeShift
+
+                    for (uint16_t j = 0; j < nPairs; ++j) {
+                        const auto left = reader.read<uint16_t>();
+                        const auto right = reader.read<uint16_t>();
+                        const auto value = reader.read<int16_t>();
+
+                        kerning_map[{left, right}] = static_cast<float>(value);
+                    }
+                } else {
+                    // Skip unhandled subtable formats
+                    reader.seek(subtable_start + length);
+                }
+            }
+        } catch (const std::exception&){}
     }
 
 }

@@ -22,6 +22,10 @@ int main() {
             save_bitmap_pgm(bitmap, "out.pgm");
         }
 
+        const auto a = font->getGlyphID(U'V');
+        const auto b = font->getGlyphID(U'A');
+        const auto kerning = font->getKerning(a,b,32);
+        std::println("Kerning: {}", kerning);
     } else {
         std::println(stderr,"Error: {}", font.error());
     }

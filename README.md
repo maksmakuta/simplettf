@@ -18,7 +18,7 @@ A modern, lightweight C++23 library for loading and rasterizing TrueType (.ttf) 
 - [X] Glyph outline extraction (Bézier curve data).
 - [X] CPU-based scanline rasterizer.
 - [X] Support for multiple `cmap` platforms (Unicode/Windows).
-- [ ] Kerning table (`kern` or `GPOS`) support.
+- [X] Kerning table (`kern`) support. (No `GPOS` support for now)
 - [ ] Extend .otf file support
 - [X] SDF bitmap rendering
 

@@ -4,6 +4,7 @@
 #include <expected>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace simplettf {
@@ -42,6 +43,21 @@ namespace simplettf {
         struct GlyphDataRange final {
             uint32_t offset;
             uint32_t length;
+        };
+
+        struct KerningPair {
+            uint32_t left;
+            uint32_t right;
+
+            bool operator==(const KerningPair& other) const {
+                return left == other.left && right == other.right;
+            }
+        };
+
+        struct KerningHash {
+            size_t operator()(const KerningPair& pair) const {
+                return static_cast<size_t>(pair.left) << 16 | pair.right;
+            }
         };
 
         std::uint32_t as_tag(const std::string& tag);
@@ -116,7 +132,10 @@ namespace simplettf {
         [[nodiscard]] static Bitmap rasterize(const Glyph& glyph);
         [[nodiscard]] static Bitmap rasterizeSDF(const Glyph& glyph,float spread = 8.0f);
 
+        float getKerning(GlyphID left, GlyphID right, float fontSize) const;
+
     private:
+        void readKerning();
         void loadTables();
         void populateGlyphCache();
         void parseFormat12(internal::BufferReader &reader);
@@ -133,6 +152,7 @@ namespace simplettf {
         std::vector<std::byte> m_font_data;
         std::vector<internal::TableInfo> m_tables;
         std::vector<internal::CMapSegment> m_segments;
+        std::unordered_map<internal::KerningPair, float, internal::KerningHash> kerning_map;
     };
 
 }
